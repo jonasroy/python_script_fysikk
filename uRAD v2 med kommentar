@@ -1,0 +1,106 @@
+import uRAD	# import the uRad libray
+import firebase_admin #imort firebase library 
+from firebase_admin import credentials
+from firebase_admin import firestore
+import time #import the time library
+import requests
+from pprint import pprint
+import csv
+from datetime import datetime
+
+
+
+# Hvis man skal endre på parameteren til radaren gjør man det her!!!!!!!!!!!!
+mode = 2	# doppler mode (mode = 1), #mode: 1 = CW , 2 = sawtooth mode, 3 = triangular, 4 = dual rate
+f0 = 5		# starting at 24.005 GHz
+BW = 240	# using all the BW available = 240 MHz
+Ns = 200	# 200 samples
+Ntar = 5	# Ser hvor mange objekter radar klare å se om gangnen. 
+Rmax = 20	# Lengste lengden radaren ser.
+MTI = 1		# MTI mode disable (irrelevant for this application) Velger om radaren skal se ignorere statiste objekt eller ikke.
+Mth = 3	# most sensitive threshold, Sensitivitet til radaren!!
+# results output array
+movement = [0]
+
+# load the configuration
+uRAD.loadConfiguration(mode, f0, BW, Ns, Ntar, Rmax, MTI, Mth)
+
+# switch ON uRAD
+uRAD.turnON()
+
+#Overføring til nettsiden. 
+
+#Konfigurasjon av linkt til nettsiden med json fil. 
+cred = credentials.Certificate("/home/pi/Library/FirestoreKey.json")
+app = firebase_admin.initialize_app(cred)
+
+store = firestore.client()
+
+#Linker til hvor dataen skal sendes i nettsiden. Sondre veit ka som skrives. 
+doc_ref = store.collection(u'Unit').document(u"Node1" ).collection(u"Activity")
+doc_ref2 = store.collection(u'Unit').document(u"Node2" ).collection(u"Activity")
+doc_ref3 = store.collection(u'Unit').document(u"Node3" ).collection(u"Activity")
+
+birdCount = 0
+
+#Henter data fra openweather.org å skriver det ut til skjerm. 
+def get_weatherdata():
+    #Overføring av værdata fra openweather.org
+    url = 'http://api.openweathermap.org/data/2.5/weather?q=Trondheim,no&appid=ab285d3403cbfd7b88c9cace599e592d'
+    res = requests.get(url)
+    data = res.json()
+    temp = data['main']['temp']
+    wind_speed = data['wind']['speed']
+    latitude = data['coord']['lat']
+    longitude = data['coord']['lon']
+    description = data['weather'][0]['description']
+    print('Temperature : {} degree celcius'.format(temp))
+    print('Wind Speed : {} m/s'.format(wind_speed))
+    print('Latitude : {}'.format(latitude))
+    print('Longitude : {}'.format(longitude))
+    print('Description : {}'.format(description))
+
+#GJør at når pien starter opp skriver den til CSV filen når pien begynte å kjøre.
+def getTimePiStartedBoot(filename):
+    f = open(filename, mode = "a") 
+    sensor_write = csv.writer(f, delimiter = ",", quotechar='"', quoting=csv.QUOTE_MINIMAL)
+    write_to_log = sensor_write.writerow(["\n", "Raspberry pi booted up: ", gettime_print(), gettime()])
+
+#Skriver til CSVfilen. 
+def WriteToCSVFile(filename):    
+ #   #the a is for append
+    f = open(filename, mode = "a") 
+    sensor_write = csv.writer(f, delimiter = ",", quotechar='"', quoting=csv.QUOTE_MINIMAL)
+    write_to_log = sensor_write.writerow(["Bird detected", "#", birdCount, " ", gettime_print(), gettime()])
+
+#Returner unix tid i sekunder som nettsiden vil ha 
+def gettime():
+    return round(time.clock_gettime(0))
+
+#Returner dato og klokkeslett som bruker til skjerm til pien og til å skirve til CSV filen. 
+def gettime_print():
+    return datetime.now()
+
+
+getTimePiStartedBoot("/home/pi/Library/FugleData")
+get_weatherdata()
+
+# infinite detection loop
+while True:
+    # target detecton request
+    uRAD.detection(0, 0, 0, 0, 0, movement)
+    
+    # print the results
+    if (movement[0] == True):
+        print("Bird detected.","#", birdCount," ", gettime_print())
+        birdCount += 1
+        WriteToCSVFile("/home/pi/Library/FugleData")
+        #doc_ref.add({u"Bird": 1, u"Cord": [10.39621,63.426905],u"TimeStamp": round(time.clock_gettime(0))-(15*24*60*60)})
+        #doc_ref2.add({u"Bird": 1, u"Cord": [10.413224,63.426838], u"TimeStamp": round(time.clock_gettime(0))})
+        #doc_ref3.add({u"Bird": 1, u"Cord": [10.404144,63.417402],u"TimeStamp": round(time.clock_gettime(0))})
+        
+#Kommenter ut doc_ref.add, doc_ref2.add, eller doc.ref3.add for å besteme hvilken node i nettsiden pien skal sende til. 
+
+
+
+
